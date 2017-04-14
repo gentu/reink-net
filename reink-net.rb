@@ -4,14 +4,39 @@ include SNMP
 require "optparse"
 require 'ostruct'
 
+class Printer
+  def initialize
+    @printers = {
+      EPSON660ABD: {
+        name: 'Epson Artisan 730 / Stylus Photo PX730WD',
+        password: [ 0x08, 0x77 ],
+        waste_ink1: [ 0x0E, 0x0F ],
+        waste_ink2: [ 0x10, 0x11 ],
+        colors: [ 'cyan', 'yellow', 'light_cyan', 'black', 'magenta', 'light_magenta' ],
+        color_code: {
+          cyan: 0x14,
+          yellow: 0x28,
+          light_cyan: 0x18,
+          black: 0x1C,
+          magenta: 0x20,
+          light_magenta: 0x24,
+        },
+      },
+    }
+  end
+
+  def printer_select model_code
+    @printers[model_code.to_sym]
+  end
+end
+
 class Application
   def initialize
     @eeprom_link = '1.3.6.1.4.1.1248.1.2.2.44.1.1.2.1.'
     @verbose = false
-    @password = [ 0x77, 0x08 ]
-    @waste_ink1 = [ 0x0E, 0x0F]
-    @waste_ink2 = [ 0x10, 0x11]
-    @manager = SNMP::Manager.new(:host => '192.168.31.2', :version => :SNMPv1)
+    @manager = SNMP::Manager.new(:host => ARGV[0], :version => :SNMPv1)
+    @printer = Printer.new.printer_select(model_code)
+    puts 'Printer support: %s' % @printer[:name]
     options = parse_options
   end
 
@@ -21,7 +46,7 @@ class Application
 
   def read_eeprom addr
     split_addr=[addr].pack('n').unpack('C*')
-    response = send_data "%s124.124.7.0.%i.%i.65.190.160.%i.%i" % [@eeprom_link, @password[0], @password[1], split_addr[1], split_addr[0]]
+    response = send_data "%s124.124.7.0.%i.%i.65.190.160.%i.%i" % [@eeprom_link, @printer[:password][1], @printer[:password][0], split_addr[1], split_addr[0]]
     raise 'EEPROM reading failed' if response.match(/NA/)
     response = response.match(/EE:[0-9A-F]{6}/).to_s
     chk_addr=response[3..6].hex
@@ -38,10 +63,14 @@ class Application
   def write_eeprom addr, value
     split_addr=[addr].pack('n').unpack('C*')
     value_before = read_eeprom addr
-    response = send_data "%s124.124.16.0.%i.%i.66.189.33.%i.%i.%i.68.98.117.117.109.102.122.98" % [@eeprom_link, @password[0], @password[1], split_addr[1], split_addr[0], value]
+    response = send_data "%s124.124.16.0.%i.%i.66.189.33.%i.%i.%i.68.98.117.117.109.102.122.98" % [@eeprom_link, @printer[:password][1], @printer[:password][0], split_addr[1], split_addr[0], value]
     value_after = read_eeprom addr
     puts "Address: 0x%04X Value: 0x%02X Before: 0x%02X After: 0x%02X (%s)" % [addr, value, value_before, value_after, response.strip]
     value != value_after && abort('ERROR: Write error!')
+  end
+
+  def model_code
+    send_data '1.3.6.1.2.1.1.5.0'
   end
 
   def info
@@ -49,7 +78,7 @@ class Application
     puts send_data '1.3.6.1.2.1.25.3.2.1.3.1'
 
     #Model code
-    puts send_data '1.3.6.1.2.1.1.5.0'
+    puts model_code
 
     #EEPS2 version
     puts send_data '1.3.6.1.2.1.2.2.1.2.1'
@@ -117,30 +146,30 @@ class Application
   end
 
   def waste_ink_levels
-    val1 = read_eeprom_multibyte(@waste_ink1)
+    val1 = read_eeprom_multibyte(@printer[:waste_ink1])
     puts "%i%%\tWaste ink counter 1. Value: %i" % [(val1/81.92).round, val1]
 
-    val2 = read_eeprom_multibyte(@waste_ink2)
+    val2 = read_eeprom_multibyte(@printer[:waste_ink2])
     puts "%i%%\tWaste ink counter 2. Value: %i" % [(val2/122.88).round, val2]
   end
 
   def reset_waste_ink
     waste_ink_levels
-    write_eeprom @waste_ink1[0],0
-    write_eeprom @waste_ink1[1],0
-    write_eeprom @waste_ink2[0],0
-    write_eeprom @waste_ink2[1],0
+    write_eeprom @printer[:waste_ink1][0],0
+    write_eeprom @printer[:waste_ink1][1],0
+    write_eeprom @printer[:waste_ink2][0],0
+    write_eeprom @printer[:waste_ink2][1],0
     waste_ink_levels
   end
 
   def brute_force
     puts 'Brute Force started. Please wait'
     (0x0000..0xffff).each do |i|
-      @password = [i].pack('n').unpack('C*')
-      puts 'Trying 0x%02X 0x%02X' % @password
+      @printer[:password] = [i].pack('n').unpack('C*')
+      puts 'Trying 0x%02X 0x%02X' % @printer[:password]
       break if read_eeprom(0x00) rescue next
     end
-    puts "Password was found: 0x%02X 0x%02X" % @password
+    puts "Password was found: 0x%02X 0x%02X" % @printer[:password]
   end
 
   def get_ink_level
@@ -156,7 +185,7 @@ class Application
   def parse_options
     options = OpenStruct.new
     optparse = OptionParser.new do |opts|
-      opts.banner = "Usage: reink-net [options]"
+      opts.banner = "Usage: reink-net [ip] [options]"
       opts.separator ""
       opts.separator "Specific options:"
 
