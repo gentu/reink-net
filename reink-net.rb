@@ -196,7 +196,6 @@ class Application
 
     @file.close if !!defined? @file
 
-#    raise OptionParser::InvalidArgument
     options
   rescue OptionParser::InvalidArgument
     puts optparse
@@ -205,15 +204,3 @@ class Application
 end
 
 Application.new
-#manager = SNMP::Manager.new(:host => '192.168.31.2', :port => 161)
-#varbind = VarBind.new("iso.3.6.1.4.1.1248.1.2.2.44.1.1.2.1.118.105.1.0.0", NIL)
-#@manager = SNMP::Manager.new(:host => '192.168.31.2', :version => :SNMPv1)
-
-# def get_data id
-#  response = @manager.get(id)
-#  response.each_varbind {|vb| puts vb.inspect}
-#end
-#get_data '1.3.6.1.4.1.1248.1.2.2.44.1.1.2.1.118.105.1.0.0' #firmware_version
-#get_data '1.3.6.1.4.1.1248.1.2.2.44.1.1.2.1.124.124.7.0.119.8.65.190.160.' + 0xff.to_s + '.' + 0xff.to_s
-#puts 0xe7.to_s
-#@manager.close
