@@ -7,7 +7,10 @@ require 'ostruct'
 class Application
   def initialize
     @eeprom_link = '1.3.6.1.4.1.1248.1.2.2.44.1.1.2.1.'
-    @verbose=false
+    @verbose = false
+    @password = [ 0x77, 0x08 ]
+    @waste_ink1 = [ 0x0E, 0x0F]
+    @waste_ink2 = [ 0x10, 0x11]
     @manager = SNMP::Manager.new(:host => '192.168.31.2', :version => :SNMPv1)
     options = parse_options
   end
@@ -20,7 +23,7 @@ class Application
     while addr.length < 4
       addr.insert(0, '0')
     end
-    response = send_data @eeprom_link + '124.124.7.0.119.8.65.190.160.' + addr[2..3].hex.to_s + '.' + addr[0..1].hex.to_s
+    response = send_data @eeprom_link + '124.124.7.0.' + @password[0].to_s + '.' + @password[1].to_s + '.65.190.160.' + addr[2..3].hex.to_s + '.' + addr[0..1].hex.to_s
     response = response.match(/EE:[0-9A-F]{6}/).to_s
     chk_addr=response[3..6]
     abort('ERROR: Address and response address not equal: 0x' + addr + ' != 0x' + chk_addr) unless addr.eql?(addr)
@@ -33,14 +36,10 @@ class Application
     while addr.length < 4
       addr.insert(0, '0')
     end
-    puts 'Write value: 0x' + value
-    puts 'Before:'
     value_before = read_eeprom addr
-    response = send_data @eeprom_link + '124.124.16.0.119.8.66.189.33.' + addr[2..3].hex.to_s + '.' + addr[0..1].hex.to_s + '.' + value.hex.to_s + '.68.98.117.117.109.102.122.98'
-    puts response
-    puts 'After:'
+    response = send_data @eeprom_link + '124.124.16.0.' + @password[0].to_s + '.' + @password[1].to_s + '.66.189.33.' + addr[2..3].hex.to_s + '.' + addr[0..1].hex.to_s + '.' + value.hex.to_s + '.68.98.117.117.109.102.122.98'
     value_after = read_eeprom addr
-    puts 'Value: 0x' + value + ' Before: 0x' + value_before + ' After: 0x' + value_after
+    puts 'Value: 0x' + value + ' Before: 0x' + value_before + ' After: 0x' + value_after + ' (' + response.strip + ')'
     value != value_after && abort('ERROR: Write error!')
   end
 
@@ -61,11 +60,7 @@ class Application
     firmware_version = send_data(@eeprom_link + '118.105.1.0.0').match(/.+:(.+);/)[1]
     puts firmware_version + "\tFirmware version."
 
-    waste_ink1 = (read_eeprom('0F') + read_eeprom('0E')).hex.to_s
-    puts (waste_ink1.to_i/81.92).round.to_s + "%\tWaste ink counter 1. Value: " + waste_ink1
-
-    waste_ink2 = (read_eeprom('11') + read_eeprom('10')).hex.to_s
-    puts (waste_ink2.to_i/122.88).round.to_s + "%\tWaste ink counter 2. Value: " + waste_ink2
+    waste_ink_levels
 
     hand_clean=read_eeprom('7E').hex.to_s
     puts hand_clean + "\tManual cleaning counter."
@@ -167,6 +162,37 @@ class Application
     raise OptionParser::InvalidArgument if addr !~ /^[0-9A-F]+$/i || addr.length != 2 && addr.length != 4
   end
 
+  def waste_ink_levels
+    waste_ink_val1 = (read_eeprom(@waste_ink1[1].to_s(16)) + read_eeprom(@waste_ink1[0].to_s(16))).hex.to_s
+    puts (waste_ink_val1.to_i/81.92).round.to_s + "%\tWaste ink counter 1. Value: " + waste_ink_val1
+
+    waste_ink_val2 = (read_eeprom(@waste_ink2[1].to_s(16)) + read_eeprom(@waste_ink2[0].to_s(16))).hex.to_s
+    puts (waste_ink_val2.to_i/122.88).round.to_s + "%\tWaste ink counter 2. Value: " + waste_ink_val2
+  end
+
+  def reset_waste_ink
+    waste_ink_levels
+    write_eeprom @waste_ink1[0].to_s(16),'00'
+    write_eeprom @waste_ink1[1].to_s(16),'00'
+    write_eeprom @waste_ink2[0].to_s(16),'00'
+    write_eeprom @waste_ink2[1].to_s(16),'00'
+    waste_ink_levels
+  end
+
+  def color_code
+    
+  end
+
+  def get_ink_level
+    result = send_data @eeprom_link + '115.116.1.0.1'
+    puts result[0x19].ord.to_s + "%\tCyan"
+    puts result[0x1C].ord.to_s + "%\tYellow"
+    puts result[0x1F].ord.to_s + "%\tLight Cyan"
+    puts result[0x22].ord.to_s + "%\tBlack"
+    puts result[0x25].ord.to_s + "%\tMagenta"
+    puts result[0x28].ord.to_s + "%\tLight Magenta"
+  end
+
   def parse_options
     options = OpenStruct.new
     optparse = OptionParser.new do |opts|
@@ -196,6 +222,12 @@ class Application
       end
       opts.on( '-i', '--info', 'Read printer info' ) do
         info
+      end
+      opts.on( '-y', '--waste', 'Reset waste ink counter' ) do
+        reset_waste_ink
+      end
+      opts.on( '-l', '--level', 'Get ink level' ) do
+        get_ink_level
       end
     end
     optparse.parse!

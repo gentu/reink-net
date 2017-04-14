@@ -1,0 +1,6 @@
+0x14 062e4b09 103697161 98% Cyan 98% 105
+0x18 00cf5796 13588374  13% Light Cyan 12%
+0x1c 01f7d0c5 33018053  13% Black 13% 250
+0x20 032e6b90 53373840  57% Yellow или Light Magenta 56% 93
+0x24 05db7c48 98270280  78% Light Magenta 78% 125
+0x28 032f71f8 53441016  57% Yellow или Light Magenta 57% 93
