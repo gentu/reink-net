@@ -20,28 +20,27 @@ class Application
   end
 
   def read_eeprom addr
-    puts addr
-    while addr.length < 4
-      addr.insert(0, '0')
-    end
-    response = send_data "%s124.124.7.0.%i.%i.65.190.160.%i.%i" % [@eeprom_link, @password[0], @password[1], addr[2..3].hex, addr[0..1].hex]
+    split_addr=[addr].pack('n').unpack('C*')
+    response = send_data "%s124.124.7.0.%i.%i.65.190.160.%i.%i" % [@eeprom_link, @password[0], @password[1], split_addr[1], split_addr[0]]
     raise 'EEPROM reading failed' if response.match(/NA/)
     response = response.match(/EE:[0-9A-F]{6}/).to_s
-    chk_addr=response[3..6]
-    addr.eql?(addr) || abort("ERROR: Address and response address not equal: 0x%02X != 0x%02X" % [addr.hex, chk_addr.hex])
-    value=response[7..8]
-    @verbose && puts("Address: 0x%04X Value: 0x%02X" % [chk_addr.hex, value.hex])
+    chk_addr=response[3..6].hex
+    addr.eql?(addr) || abort("ERROR: Address and response address not equal: 0x%02X != 0x%02X" % [addr, chk_addr])
+    value=response[7..8].hex
+    @verbose && puts("Address: 0x%04X Value: 0x%02X" % [chk_addr, value])
     return value
   end
 
+  def read_eeprom_multibyte addr
+    addr.reverse.collect{|i| read_eeprom(i).to_s(16)}.join.hex
+  end
+
   def write_eeprom addr, value
-    while addr.length < 4
-      addr.insert(0, '0')
-    end
+    split_addr=[addr].pack('n').unpack('C*')
     value_before = read_eeprom addr
-    response = send_data "%s124.124.16.0.%i.%i.66.189.33.%i.%i.%i.68.98.117.117.109.102.122.98" % [@eeprom_link, @password[0], @password[1], addr[2..3].hex, addr[0..1].hex, value.hex]
+    response = send_data "%s124.124.16.0.%i.%i.66.189.33.%i.%i.%i.68.98.117.117.109.102.122.98" % [@eeprom_link, @password[0], @password[1], split_addr[1], split_addr[0], value]
     value_after = read_eeprom addr
-    puts "Address: 0x%04X Value: 0x%02X Before: 0x%02X After: 0x%02X (%s)" % [addr.hex, value.hex, value_before.hex, value_after.hex, response.strip]
+    puts "Address: 0x%04X Value: 0x%02X Before: 0x%02X After: 0x%02X (%s)" % [addr, value, value_before, value_after, response.strip]
     value != value_after && abort('ERROR: Write error!')
   end
 
@@ -55,87 +54,82 @@ class Application
     #EEPS2 version
     puts send_data '1.3.6.1.2.1.2.2.1.2.1'
 
-    serial_number_hex = (0xE7..0xF0).collect{|i| read_eeprom i.to_s(16)}.join
-    puts "%s Serial number" % [serial_number_hex].pack("H*")
+    puts "%s Serial number" % (0xE7..0xF0).collect{|i| read_eeprom i}.pack('C*')
 
     puts "%s\tFirmware version." % send_data(@eeprom_link + '118.105.1.0.0').match(/.+:(.+);/)[1]
 
     waste_ink_levels
 
-    puts "%i\tManual cleaning counter." % read_eeprom('7E').hex
-    puts  "%i\tTimer cleaning counter." % read_eeprom('61').hex
+    puts "%i\tManual cleaning counter." % read_eeprom(0x7E)
+    puts  "%i\tTimer cleaning counter." % read_eeprom(0x61)
 
-    puts "%i\tTotal print pass counter." % (read_eeprom('2F') + read_eeprom('2E') + read_eeprom('2D') + read_eeprom('2C')).hex
+    puts "%i\tTotal print pass counter." % read_eeprom_multibyte([0x2C,0x2D,0x2E,0x2F])
 
-    puts "%i\tTotal print page counter." % (read_eeprom('9F') + read_eeprom('9E')).hex
-    puts "%i\tTotal print page counter (duplex)." % (read_eeprom('A1') + read_eeprom('A0')).hex
+    puts "%i\tTotal print page counter." % read_eeprom_multibyte([0x9E,0x9F])
+    puts "%i\tTotal print page counter (duplex)." % read_eeprom_multibyte([0xA0,0xA1])
 
-    puts "%i\tTotal print CD-R counter." % (read_eeprom('4B') + read_eeprom('4A')).hex
-    puts "%i\tTotal print CD-R tray open/close counter." % (read_eeprom('A3') + read_eeprom('A2')).hex
+    puts "%i\tTotal print CD-R counter." % read_eeprom_multibyte([0x4A,0x4B])
+    puts "%i\tTotal print CD-R tray open/close counter." % read_eeprom_multibyte([0xA2,0xA3])
 
-    puts "%i\tTotal scan counter." % (read_eeprom('01DD') + read_eeprom('01DC') + read_eeprom('01DB') + read_eeprom('01DA')).hex
+    puts "%i\tTotal scan counter." % read_eeprom_multibyte([0x01DA,0x01DB,0x01DC,0x01DD])
 
-    puts "0x%s\tLast printer fatal error code 1." % read_eeprom('3B')
-    puts "0x%s\tLast printer fatal error code 2." % read_eeprom('C0')
-    puts "0x%s\tLast printer fatal error code 3." % read_eeprom('C1')
-    puts "0x%s\tLast printer fatal error code 4." % read_eeprom('C2')
-    puts "0x%s\tLast printer fatal error code 5." % read_eeprom('C3')
-    puts "0x%s\tLast scanner fatal error code 1." % read_eeprom('5C')
+    puts "0x%02X\tLast printer fatal error code 1." % read_eeprom(0x3B)
+    puts "0x%02X\tLast printer fatal error code 2." % read_eeprom(0xC0)
+    puts "0x%02X\tLast printer fatal error code 3." % read_eeprom(0xC1)
+    puts "0x%02X\tLast printer fatal error code 4." % read_eeprom(0xC2)
+    puts "0x%02X\tLast printer fatal error code 5." % read_eeprom(0xC3)
+    puts "0x%02X\tLast scanner fatal error code 1." % read_eeprom(0x5C)
 
-    puts "%i\tInk replacement counter for black (1S)" % read_eeprom('66').hex
-    puts "%i\tInk replacement counter for black (2S)" % read_eeprom('67').hex
-    puts "%i\tInk replacement counter for black (3S)" % read_eeprom('62').hex
+    puts "%i\tInk replacement counter for black (1S)" % read_eeprom(0x66)
+    puts "%i\tInk replacement counter for black (2S)" % read_eeprom(0x67)
+    puts "%i\tInk replacement counter for black (3S)" % read_eeprom(0x62)
 
-    puts "%i\tInk replacement counter for yellow (1S)" % read_eeprom('70').hex
-    puts "%i\tInk replacement counter for yellow (2S)" % read_eeprom('71').hex
-    puts "%i\tInk replacement counter for yellow (3S)" % read_eeprom('AB').hex
+    puts "%i\tInk replacement counter for yellow (1S)" % read_eeprom(0x70)
+    puts "%i\tInk replacement counter for yellow (2S)" % read_eeprom(0x71)
+    puts "%i\tInk replacement counter for yellow (3S)" % read_eeprom(0xAB)
 
-    puts "%i\tInk replacement counter for magenta (1S)" % read_eeprom('68').hex
-    puts "%i\tInk replacement counter for magenta (2S)" % read_eeprom('69').hex
-    puts "%i\tInk replacement counter for magenta (3S)" % read_eeprom('63').hex
+    puts "%i\tInk replacement counter for magenta (1S)" % read_eeprom(0x68)
+    puts "%i\tInk replacement counter for magenta (2S)" % read_eeprom(0x69)
+    puts "%i\tInk replacement counter for magenta (3S)" % read_eeprom(0x63)
 
-    puts "%i\tInk replacement counter for cyan (1S)" % read_eeprom('6C').hex
-    puts "%i\tInk replacement counter for cyan (2S)" % read_eeprom('6D').hex
-    puts "%i\tInk replacement counter for cyan (3S)" % read_eeprom('65').hex
+    puts "%i\tInk replacement counter for cyan (1S)" % read_eeprom(0x6C)
+    puts "%i\tInk replacement counter for cyan (2S)" % read_eeprom(0x6D)
+    puts "%i\tInk replacement counter for cyan (3S)" % read_eeprom(0x65)
 
-    puts "%i\tInk replacement counter for light magenta (1S)" % read_eeprom('6A').hex
-    puts "%i\tInk replacement counter for light magenta (2S)" % read_eeprom('6B').hex
-    puts "%i\tInk replacement counter for light magenta (3S)" % read_eeprom('64').hex
+    puts "%i\tInk replacement counter for light magenta (1S)" % read_eeprom(0x6A)
+    puts "%i\tInk replacement counter for light magenta (2S)" % read_eeprom(0x6B)
+    puts "%i\tInk replacement counter for light magenta (3S)" % read_eeprom(0x64)
 
-    puts "%i\tInk replacement counter for light cyan (1S)" % read_eeprom('6E').hex
-    puts "%i\tInk replacement counter for light cyan (2S)" % read_eeprom('6F').hex
-    puts "%i\tInk replacement counter for light cyan (3S)" % read_eeprom('9B').hex
+    puts "%i\tInk replacement counter for light cyan (1S)" % read_eeprom(0x6E)
+    puts "%i\tInk replacement counter for light cyan (2S)" % read_eeprom(0x6F)
+    puts "%i\tInk replacement counter for light cyan (3S)" % read_eeprom(0x9B)
   end
 
   def dump_eeprom addr_start, addr_end
-    a = addr_start.hex
-    b = addr_end.hex
+    a = addr_start
+    b = addr_end
     a > b && abort("ERROR: Start address greater than end address: 0x%04X > 0x%04X" % [addr_start, addr_end])
     while a <= b do
-      value = read_eeprom a.to_s(16)
-      @file.putc value.hex if !!defined? @file
+      value = read_eeprom a
+      @file.putc value if !!defined? @file
       a += 1
     end
   end
 
-  def hex_check addr
-    raise OptionParser::InvalidArgument if addr !~ /^[0-9A-F]+$/i || addr.length != 2 && addr.length != 4
-  end
-
   def waste_ink_levels
-    waste_ink_val1 = (read_eeprom(@waste_ink1[1].to_s(16)) + read_eeprom(@waste_ink1[0].to_s(16))).hex
-    puts "%i%%\tWaste ink counter 1. Value: %i" % [(waste_ink_val1/81.92).round, waste_ink_val1]
+    val1 = read_eeprom_multibyte(@waste_ink1)
+    puts "%i%%\tWaste ink counter 1. Value: %i" % [(val1/81.92).round, val1]
 
-    waste_ink_val2 = (read_eeprom(@waste_ink2[1].to_s(16)) + read_eeprom(@waste_ink2[0].to_s(16))).hex
-    puts "%i%%\tWaste ink counter 2. Value: %i" % [(waste_ink_val2/122.88).round, waste_ink_val2]
+    val2 = read_eeprom_multibyte(@waste_ink2)
+    puts "%i%%\tWaste ink counter 2. Value: %i" % [(val2/122.88).round, val2]
   end
 
   def reset_waste_ink
     waste_ink_levels
-    write_eeprom @waste_ink1[0].to_s(16),'00'
-    write_eeprom @waste_ink1[1].to_s(16),'00'
-    write_eeprom @waste_ink2[0].to_s(16),'00'
-    write_eeprom @waste_ink2[1].to_s(16),'00'
+    write_eeprom @waste_ink1[0],0
+    write_eeprom @waste_ink1[1],0
+    write_eeprom @waste_ink2[0],0
+    write_eeprom @waste_ink2[1],0
     waste_ink_levels
   end
 
@@ -144,7 +138,7 @@ class Application
     (0x0000..0xffff).each do |i|
       @password = [i].pack('n').unpack('C*')
       puts 'Trying 0x%02X 0x%02X' % @password
-      break if read_eeprom('00') rescue next
+      break if read_eeprom(0x00) rescue next
     end
     puts "Password was found: 0x%02X 0x%02X" % @password
   end
@@ -170,20 +164,19 @@ class Application
         @file = File.new(args, 'wb')
       end
       opts.on( '-r', '--read [HEX](-[HEX])', String, 'Read value in address 0000-FFFF' ) do |args|
-        raise OptionParser::InvalidArgument unless args[0] != '-' && args[-1] != '-'
-        addr_start=args.split('-').first.upcase
-        args.include?('-') ? addr_end=args.split('-').last.upcase : addr_end=addr_start
-        hex_check addr_start
-        hex_check addr_end
-        @verbose=true
+        raise OptionParser::InvalidArgument unless args.match(/[^0-9a-fA-F-]+/).nil? or args[0] != '-' or args[-1] != '-'
+        args = args.split('-')
+        addr_start=args[0].hex # FF case
+        args[1] ? addr_end=args[1].hex : addr_end=addr_start # 00-FF case
+        raise OptionParser::InvalidArgument if addr_start > 0xFFFF or addr_end > 0xFFFF
+        @verbose=true # Enable messages
         dump_eeprom addr_start, addr_end
       end
       opts.on( '-w', '--write [HEX]=[HEX]', String, 'Write value to address 0000-FFFF' ) do |args|
-        raise OptionParser::InvalidArgument unless args.include?('=') && args[0] != '=' && args[-1] != '='
-        address=args.split('=').first.upcase
-        value=args.split('=').last.upcase
-        hex_check address
-        hex_check value
+        raise OptionParser::InvalidArgument unless args.match(/[^0-9a-fA-F-]+/).nil? or args.include?('=') or args[0] != '=' or args[-1] != '='
+        args = args.split('=')
+        address=args[0].hex
+        value=args[1].hex
         write_eeprom address, value
       end
       opts.on( '-i', '--info', 'Read printer info' ) do
