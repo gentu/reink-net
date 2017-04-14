@@ -20,15 +20,17 @@ class Application
   end
 
   def read_eeprom addr
+    puts addr
     while addr.length < 4
       addr.insert(0, '0')
     end
-    response = send_data @eeprom_link + '124.124.7.0.' + @password[0].to_s + '.' + @password[1].to_s + '.65.190.160.' + addr[2..3].hex.to_s + '.' + addr[0..1].hex.to_s
+    response = send_data "%s124.124.7.0.%i.%i.65.190.160.%i.%i" % [@eeprom_link, @password[0], @password[1], addr[2..3].hex, addr[0..1].hex]
+    raise 'EEPROM reading failed' if response.match(/NA/)
     response = response.match(/EE:[0-9A-F]{6}/).to_s
     chk_addr=response[3..6]
-    abort('ERROR: Address and response address not equal: 0x' + addr + ' != 0x' + chk_addr) unless addr.eql?(addr)
+    addr.eql?(addr) || abort("ERROR: Address and response address not equal: 0x%02X != 0x%02X" % [addr.hex, chk_addr.hex])
     value=response[7..8]
-    puts 'Address: 0x' + chk_addr + ' Value: 0x' + value if @verbose
+    @verbose && puts("Address: 0x%04X Value: 0x%02X" % [chk_addr.hex, value.hex])
     return value
   end
 
@@ -37,9 +39,9 @@ class Application
       addr.insert(0, '0')
     end
     value_before = read_eeprom addr
-    response = send_data @eeprom_link + '124.124.16.0.' + @password[0].to_s + '.' + @password[1].to_s + '.66.189.33.' + addr[2..3].hex.to_s + '.' + addr[0..1].hex.to_s + '.' + value.hex.to_s + '.68.98.117.117.109.102.122.98'
+    response = send_data "%s124.124.16.0.%i.%i.66.189.33.%i.%i.%i.68.98.117.117.109.102.122.98" % [@eeprom_link, @password[0], @password[1], addr[2..3].hex, addr[0..1].hex, value.hex]
     value_after = read_eeprom addr
-    puts 'Value: 0x' + value + ' Before: 0x' + value_before + ' After: 0x' + value_after + ' (' + response.strip + ')'
+    puts "Address: 0x%04X Value: 0x%02X Before: 0x%02X After: 0x%02X (%s)" % [addr.hex, value.hex, value_before.hex, value_after.hex, response.strip]
     value != value_after && abort('ERROR: Write error!')
   end
 
@@ -54,103 +56,61 @@ class Application
     puts send_data '1.3.6.1.2.1.2.2.1.2.1'
 
     serial_number_hex = (0xE7..0xF0).collect{|i| read_eeprom i.to_s(16)}.join
-    serial_number_ascii=[serial_number_hex].pack("H*")
-    puts serial_number_ascii + " Serial number"
+    puts "%s Serial number" % [serial_number_hex].pack("H*")
 
-    firmware_version = send_data(@eeprom_link + '118.105.1.0.0').match(/.+:(.+);/)[1]
-    puts firmware_version + "\tFirmware version."
+    puts "%s\tFirmware version." % send_data(@eeprom_link + '118.105.1.0.0').match(/.+:(.+);/)[1]
 
     waste_ink_levels
 
-    hand_clean=read_eeprom('7E').hex.to_s
-    puts hand_clean + "\tManual cleaning counter."
+    puts "%i\tManual cleaning counter." % read_eeprom('7E').hex
+    puts  "%i\tTimer cleaning counter." % read_eeprom('61').hex
 
-    timer_clean=read_eeprom('61').hex.to_s
-    puts timer_clean + "\tTimer cleaning counter."
+    puts "%i\tTotal print pass counter." % (read_eeprom('2F') + read_eeprom('2E') + read_eeprom('2D') + read_eeprom('2C')).hex
 
-    head_pass=(read_eeprom('2F') + read_eeprom('2E') + read_eeprom('2D') + read_eeprom('2C')).hex.to_s
-    puts head_pass + "\tTotal print pass counter."
+    puts "%i\tTotal print page counter." % (read_eeprom('9F') + read_eeprom('9E')).hex
+    puts "%i\tTotal print page counter (duplex)." % (read_eeprom('A1') + read_eeprom('A0')).hex
 
-    printed_pages=(read_eeprom('9F') + read_eeprom('9E')).hex.to_s
-    puts printed_pages + "\tTotal print page counter."
+    puts "%i\tTotal print CD-R counter." % (read_eeprom('4B') + read_eeprom('4A')).hex
+    puts "%i\tTotal print CD-R tray open/close counter." % (read_eeprom('A3') + read_eeprom('A2')).hex
 
-    printed_pages_duplex=(read_eeprom('A1') + read_eeprom('A0')).hex.to_s
-    puts printed_pages_duplex + "\tTotal print page counter (duplex)."
+    puts "%i\tTotal scan counter." % (read_eeprom('01DD') + read_eeprom('01DC') + read_eeprom('01DB') + read_eeprom('01DA')).hex
 
-    printed_dvd=(read_eeprom('4B') + read_eeprom('4A')).hex.to_s
-    puts printed_dvd + "\tTotal print CD-R counter."
+    puts "0x%s\tLast printer fatal error code 1." % read_eeprom('3B')
+    puts "0x%s\tLast printer fatal error code 2." % read_eeprom('C0')
+    puts "0x%s\tLast printer fatal error code 3." % read_eeprom('C1')
+    puts "0x%s\tLast printer fatal error code 4." % read_eeprom('C2')
+    puts "0x%s\tLast printer fatal error code 5." % read_eeprom('C3')
+    puts "0x%s\tLast scanner fatal error code 1." % read_eeprom('5C')
 
-    openclose_dvd=(read_eeprom('A3') + read_eeprom('A2')).hex.to_s
-    puts openclose_dvd + "\tTotal print CD-R tray open/close counter."
+    puts "%i\tInk replacement counter for black (1S)" % read_eeprom('66').hex
+    puts "%i\tInk replacement counter for black (2S)" % read_eeprom('67').hex
+    puts "%i\tInk replacement counter for black (3S)" % read_eeprom('62').hex
 
-    scaned_pages=(read_eeprom('01DD') + read_eeprom('01DC') + read_eeprom('01DB') + read_eeprom('01DA')).hex.to_s
-    puts scaned_pages + "\tTotal scan counter."
+    puts "%i\tInk replacement counter for yellow (1S)" % read_eeprom('70').hex
+    puts "%i\tInk replacement counter for yellow (2S)" % read_eeprom('71').hex
+    puts "%i\tInk replacement counter for yellow (3S)" % read_eeprom('AB').hex
 
-    printer_fail1=read_eeprom('3B').to_s
-    puts printer_fail1 + "\tLast printer fatal error code 1."
+    puts "%i\tInk replacement counter for magenta (1S)" % read_eeprom('68').hex
+    puts "%i\tInk replacement counter for magenta (2S)" % read_eeprom('69').hex
+    puts "%i\tInk replacement counter for magenta (3S)" % read_eeprom('63').hex
 
-    printer_fail2=read_eeprom('C0').to_s
-    puts printer_fail2 + "\tLast printer fatal error code 2."
+    puts "%i\tInk replacement counter for cyan (1S)" % read_eeprom('6C').hex
+    puts "%i\tInk replacement counter for cyan (2S)" % read_eeprom('6D').hex
+    puts "%i\tInk replacement counter for cyan (3S)" % read_eeprom('65').hex
 
-    printer_fail3=read_eeprom('C1').to_s
-    puts printer_fail3 + "\tLast printer fatal error code 3."
+    puts "%i\tInk replacement counter for light magenta (1S)" % read_eeprom('6A').hex
+    puts "%i\tInk replacement counter for light magenta (2S)" % read_eeprom('6B').hex
+    puts "%i\tInk replacement counter for light magenta (3S)" % read_eeprom('64').hex
 
-    printer_fail4=read_eeprom('C2').to_s
-    puts printer_fail4 + "\tLast printer fatal error code 4."
-
-    printer_fail5=read_eeprom('C3').to_s
-    puts printer_fail5 + "\tLast printer fatal error code 5."
-
-    scanner_fail1=read_eeprom('5C').to_s
-    puts scanner_fail1 + "\tLast scanner fatal error code 1."
-
-    cartridge_black1=read_eeprom('66').hex.to_s
-    puts cartridge_black1 + "\tInk replacement counter for black (S)"
-    cartridge_black2=read_eeprom('67').hex.to_s
-    puts cartridge_black2 + "\tInk replacement counter for black (2S)"
-    cartridge_black3=read_eeprom('62').hex.to_s
-    puts cartridge_black3 + "\tInk replacement counter for black (3S)"
-
-    cartridge_yellow1=read_eeprom('70').hex.to_s
-    puts cartridge_yellow1 + "\tInk replacement counter for yellow (S)"
-    cartridge_yellow2=read_eeprom('71').hex.to_s
-    puts cartridge_yellow2 + "\tInk replacement counter for yellow (2S)"
-    cartridge_yellow3=read_eeprom('AB').hex.to_s
-    puts cartridge_yellow3 + "\tInk replacement counter for yellow (3S)"
-
-    cartridge_magenta1=read_eeprom('68').hex.to_s
-    puts cartridge_magenta1 + "\tInk replacement counter for magenta (S)"
-    cartridge_magenta2=read_eeprom('69').hex.to_s
-    puts cartridge_magenta2 + "\tInk replacement counter for magenta (2S)"
-    cartridge_magenta3=read_eeprom('63').hex.to_s
-    puts cartridge_magenta3 + "\tInk replacement counter for magenta (3S)"
-
-    cartridge_cyan1=read_eeprom('6C').hex.to_s
-    puts cartridge_cyan1 + "\tInk replacement counter for cyan (S)"
-    cartridge_cyan2=read_eeprom('6D').hex.to_s
-    puts cartridge_cyan2 + "\tInk replacement counter for cyan (2S)"
-    cartridge_cyan3=read_eeprom('65').hex.to_s
-    puts cartridge_cyan3 + "\tInk replacement counter for cyan (3S)"
-
-    cartridge_light_magenta1=read_eeprom('6A').hex.to_s
-    puts cartridge_light_magenta1 + "\tInk replacement counter for light magenta (S)"
-    cartridge_light_magenta2=read_eeprom('6B').hex.to_s
-    puts cartridge_light_magenta2 + "\tInk replacement counter for light magenta (2S)"
-    cartridge_light_magenta3=read_eeprom('64').hex.to_s
-    puts cartridge_light_magenta3 + "\tInk replacement counter for light magenta (3S)"
-
-    cartridge_light_cyan1=read_eeprom('6E').hex.to_s
-    puts cartridge_light_cyan1 + "\tInk replacement counter for light cyan (S)"
-    cartridge_light_cyan2=read_eeprom('6F').hex.to_s
-    puts cartridge_light_cyan2 + "\tInk replacement counter for light cyan (2S)"
-    cartridge_light_cyan3=read_eeprom('9B').hex.to_s
-    puts cartridge_light_cyan3 + "\tInk replacement counter for light cyan (3S)"
+    puts "%i\tInk replacement counter for light cyan (1S)" % read_eeprom('6E').hex
+    puts "%i\tInk replacement counter for light cyan (2S)" % read_eeprom('6F').hex
+    puts "%i\tInk replacement counter for light cyan (3S)" % read_eeprom('9B').hex
   end
 
   def dump_eeprom addr_start, addr_end
     a = addr_start.hex
     b = addr_end.hex
-    a > b && abort('ERROR: Start address greater than end address: 0x' + addr_start + ' > 0x' + addr_end)
+    a > b && abort("ERROR: Start address greater than end address: 0x%04X > 0x%04X" % [addr_start, addr_end])
     while a <= b do
       value = read_eeprom a.to_s(16)
       @file.putc value.hex if !!defined? @file
@@ -163,11 +123,11 @@ class Application
   end
 
   def waste_ink_levels
-    waste_ink_val1 = (read_eeprom(@waste_ink1[1].to_s(16)) + read_eeprom(@waste_ink1[0].to_s(16))).hex.to_s
-    puts (waste_ink_val1.to_i/81.92).round.to_s + "%\tWaste ink counter 1. Value: " + waste_ink_val1
+    waste_ink_val1 = (read_eeprom(@waste_ink1[1].to_s(16)) + read_eeprom(@waste_ink1[0].to_s(16))).hex
+    puts "%i%%\tWaste ink counter 1. Value: %i" % [(waste_ink_val1/81.92).round, waste_ink_val1]
 
-    waste_ink_val2 = (read_eeprom(@waste_ink2[1].to_s(16)) + read_eeprom(@waste_ink2[0].to_s(16))).hex.to_s
-    puts (waste_ink_val2.to_i/122.88).round.to_s + "%\tWaste ink counter 2. Value: " + waste_ink_val2
+    waste_ink_val2 = (read_eeprom(@waste_ink2[1].to_s(16)) + read_eeprom(@waste_ink2[0].to_s(16))).hex
+    puts "%i%%\tWaste ink counter 2. Value: %i" % [(waste_ink_val2/122.88).round, waste_ink_val2]
   end
 
   def reset_waste_ink
@@ -179,18 +139,24 @@ class Application
     waste_ink_levels
   end
 
-  def color_code
-    
+  def brute_force
+    puts 'Brute Force started. Please wait'
+    (0x0000..0xffff).each do |i|
+      @password = [i].pack('n').unpack('C*')
+      puts 'Trying 0x%02X 0x%02X' % @password
+      break if read_eeprom('00') rescue next
+    end
+    puts "Password was found: 0x%02X 0x%02X" % @password
   end
 
   def get_ink_level
     result = send_data @eeprom_link + '115.116.1.0.1'
-    puts result[0x19].ord.to_s + "%\tCyan"
-    puts result[0x1C].ord.to_s + "%\tYellow"
-    puts result[0x1F].ord.to_s + "%\tLight Cyan"
-    puts result[0x22].ord.to_s + "%\tBlack"
-    puts result[0x25].ord.to_s + "%\tMagenta"
-    puts result[0x28].ord.to_s + "%\tLight Magenta"
+    puts "%i%%\tCyan" % result[0x19].ord
+    puts "%i%%\tYellow" % result[0x1C].ord
+    puts "%i%%\tLight Cyan" % result[0x1F].ord
+    puts "%i%%\tBlack" % result[0x22].ord
+    puts "%i%%\tMagenta" % result[0x25].ord
+    puts "%i%%\tLight Magenta" % result[0x28].ord
   end
 
   def parse_options
@@ -228,6 +194,9 @@ class Application
       end
       opts.on( '-l', '--level', 'Get ink level' ) do
         get_ink_level
+      end
+      opts.on( '-b', '--brute', 'Get printer password (Brute Force)' ) do
+        brute_force
       end
     end
     optparse.parse!
